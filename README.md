@@ -8,7 +8,7 @@
 
 **Date:** 16-December-2025
 
-**Incident Date:** 22-December-2025
+**Incident Date:** 25-November-2025
 
 ---
 
@@ -492,10 +492,10 @@ DeviceProcessEvents
 
 ## 2. Investigation Summary
 
-Five days after the initial file server compromise, the threat actor returned to the environment and escalated the intrusion significantly. Using the previously compromised account, `yuki.tanaka`, the attacker pivoted laterally from host `10.1.0.204` to `azuki-adminpc`, the CEO's administrative workstation — a high-value target with access to sensitive financial and credential data.
-On the new target, the attacker deployed a **Meterpreter** implant (disguised as `meterpreter.exe`) communicating over a named pipe (`msf-pipe-5902`), establishing persistent command-and-control. To maintain access even if discovered, they created a hidden local administrator account, `yuki.tanaka2`, via base64-obfuscated commands.
-The attacker then conducted extensive **reconnaissance** (active session, domain trust, and network enumeration via `qwinsta`, `nltest`, and `netstat`) before locating and harvesting credential stores, including a KeePass database (`OLD-Passwords.txt`, `KeePass-Master-Password.txt`) and Chrome-stored browser credentials extracted using a Mimikatz-based tool (`m.exe`).
-Sensitive files — including banking records — were staged via `Robocopy` into `C:\ProgramData\Microsoft\Crypto\staging`, where **8 password-protected archives** were prepared using 7-Zip for exfiltration. Stolen data, including `credentials.tar.gz`, was exfiltrated via HTTP POST to the anonymous file-sharing service `gofile.io` (store1.gofile.io), with supporting infrastructure tied to IP `45.112.123.227` and a secondary download from the previously identified C2 domain `litter.catbox.moe`.
+Five days after the initial file server compromise, the threat actor returned to the environment and escalated the intrusion significantly. Using the previously compromised account, `yuki.tanaka`, the attacker pivoted laterally from host `10.1.0.204` to `azuki-adminpc`, the CEO's administrative workstation — a high-value target with access to sensitive financial and credential data.  
+On the new target, the attacker deployed a **Meterpreter** implant (disguised as `meterpreter.exe`) communicating over a named pipe (`msf-pipe-5902`), establishing persistent command-and-control. To maintain access even if discovered, they created a hidden local administrator account, `yuki.tanaka2`, via base64-obfuscated commands.  
+The attacker then conducted extensive **reconnaissance** (active session, domain trust, and network enumeration via `qwinsta`, `nltest`, and `netstat`) before locating and harvesting credential stores, including a KeePass database (`OLD-Passwords.txt`, `KeePass-Master-Password.txt`) and Chrome-stored browser credentials extracted using a Mimikatz-based tool (`m.exe`).  
+Sensitive files — including banking records — were staged via `Robocopy` into `C:\ProgramData\Microsoft\Crypto\staging`, where **8 password-protected archives** were prepared using 7-Zip for exfiltration. Stolen data, including `credentials.tar.gz`, was exfiltrated via HTTP POST to the anonymous file-sharing service `gofile.io` (store1.gofile.io), with supporting infrastructure tied to IP `45.112.123.227` and a secondary download from the previously identified C2 domain `litter.catbox.moe`.  
 This second-stage intrusion represents a significant escalation: from initial workstation compromise to CEO-level access, persistent backdoor deployment, credential database theft, and confirmed exfiltration of financial and authentication data — warranting immediate credential resets, IOC blocking, and full forensic review of the affected systems.
 
 ---
@@ -535,10 +535,29 @@ This second-stage intrusion represents a significant escalation: from initial wo
 - Kill any running `meterpreter.exe` processes and hunt for the `msf-pipe-5902` named pipe pattern on other hosts.
 - Preserve volatile evidence (memory, network connections, process list) before remediation actions.
 
+### Short-term Remediation
+
+- Conduct environment-wide IOC and TTP sweep (same archive tool usage, curl downloads, staging directories, named pipe patterns) on all hosts, especially admin workstations.
+- Rotate all credentials stored in the compromised KeePass database and review for reuse across systems.
+- Restrict/whitelist execution of compression and download utilities (7z.exe, curl.exe, robocopy.exe) from non-administrative contexts.
+- Enable enhanced logging: process creation with command-line auditing, PowerShell script block logging, and named pipe creation events.
+- Restrict or monitor outbound traffic to anonymous file-sharing/storage services (gofile.io, catbox.moe, and similar).
+- Re-image affected endpoints (azuki-adminpc, originally compromised file server, 10.1.0.204) rather than relying on cleanup alone.
+
+### Long-term Remediation
+
+- Deploy/strengthen EDR with behavioral detections for archive-then-exfil patterns, suspicious named pipes, and DPAPI credential access.
+- Implement a Privileged Access Management (PAM) solution; remove standing local admin rights, especially on executive/admin workstations.
+- Enforce network segmentation isolating high-value endpoints (executive PCs, file servers) from general user segments.
+- Mandate MFA for all privileged accounts and migrate away from plaintext credential files toward enterprise password management with audit trails.
+- Deploy DLP controls to detect bulk staging and outbound transfers of compressed/archived data.
+- Integrate threat intelligence feeds to proactively block known infrastructure (e.g., catbox.moe, gofile.io patterns) where business need doesn't require access.
+- Conduct regular purple-team exercises to validate detection coverage for lateral movement, persistence, and exfiltration TTPs identified in this incident.
+
 ---
 
 **Report Status:** Complete  
 
-**Next Review:** 23th December 2025
+**Next Review:** 23rd December 2025
 
 **Distribution:** Cyber Range
