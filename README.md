@@ -6,7 +6,7 @@
 
 **Analyst:** Nadezna Morris
 
-**Date:** 06-December-2025
+**Date:** 16-December-2025
 
 **Incident Date:** 22-December-2025
 
@@ -14,14 +14,30 @@
 
 ## Executive Summary
 
+Five days after the initial file server breach, the threat actor returned and significantly escalated the intrusion — pivoting from the previously compromised workstation to the CEO's administrative PC, deploying a Meterpreter backdoor, creating a hidden admin account for persistence, and harvesting credential databases and browser passwords. The attacker staged sensitive financial data into **8 password-protected archives** and exfiltrated them, along with a credentials archive, to the anonymous file-sharing service **gofile.io**. This represents a critical escalation requiring immediate containment, credential resets, and a full forensic review.
+
 ---
 
 ## 1. Findings
 
 ### **Key Indicators of Compromise (IOCs):**
 
-| Indicator              | Description                                       |
-| ---------------------- | --------------------------------------------------|
+| Indicator                                                            | Description                  |
+| -------------------------------------------------------------------- | -----------------------------|
+| 10.1.0.204                                                           | Lateral movement source host |
+| yuki.tanaka                                                          | Compromised account          |
+| yuki.tanaka2                                                         | Rogue persistence account    |
+| azuki-adminpc                                                        | Target host                  |
+| litter.catbox.moe                                                    | C2 domain                    |
+| 45.112.123.227                                                       | C2 / Exfil IP                |
+| meterpreter.exe                                                      | Implant                      | 
+| \Device\NamedPipe\msf-pipe-5902                                      | Named pipe (C2)              |
+| C:\ProgramData\Microsoft\Crypto\staging                              | Staging directory            |
+| credentials.tar.gz                                                   | Exfil archive (credentials)  |
+| gofile.io (store1.gofile.io)                                         | Exfil destination            |
+| m.exe (Mimikatz-based)                                               | Credential dumping tool      |
+| OLD-Passwords.txt, KeePass-Master-Password.txt                       | Sensitive files accessed     |
+| 7z.exe, curl.exe, robocopy.exe, qwinsta.exe, nltest.exe, netstat.exe | Tools abused                 |
 
 ---
 
@@ -418,23 +434,111 @@ DeviceProcessEvents
 | project TimeGenerated, DeviceName, FileName, ProcessCommandLine
 | order by TimeGenerated desc
 ```
-<img width="1092" height="82" alt="image" src="https://github.com/user-attachments/assets/7fcda01a-f0f0-4088-bcf5-a6648a655f65" />
+<img width="992" height="72" alt="image" src="https://github.com/user-attachments/assets/7fcda01a-f0f0-4088-bcf5-a6648a655f65" />
 
+---
 
+***FLAG 23: EXFILTRATION - Cloud Storage Service***
 
+**Objective:** Anonymous file sharing services provide temporary storage with self-destructing links, complicating data recovery and attribution.
 
-**Objective:** 
+**Flag:** `gofile.io`
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-adminpc"
+| where TimeGenerated between (datetime(2025-11-24) .. datetime(2025-12-14))
+| where ProcessCommandLine has_any ("credentials.tar.gz")
+| project TimeGenerated, DeviceName, FileName, ProcessCommandLine
+| order by TimeGenerated desc
+```
+<img width="992" height="72" alt="image" src="https://github.com/user-attachments/assets/7fcda01a-f0f0-4088-bcf5-a6648a655f65" />
 
-**Flag:**
+---
 
+***FLAG 24: EXFILTRATION - Destination Server***
 
+**Objective:** IP addresses enable network-layer blocking and threat intelligence correlation when domain-based controls fail or are bypassed.
 
+**Flag:** `45.112.123.227`
+```
+DeviceNetworkEvents
+| where DeviceName == "azuki-adminpc"
+| where TimeGenerated between (datetime(2025-11-24) .. datetime(2025-12-14))
+| where ActionType == "ConnectionSuccess"
+| where RemoteUrl has_any ("gofile")
+| project TimeGenerated, DeviceName, RemoteIP, RemoteUrl
+| order by TimeGenerated asc
+```
+<img width="566" height="72" alt="image" src="https://github.com/user-attachments/assets/fba96cdd-c7b9-4104-b98e-d7541f75687c" />
 
-**Objective:** 
+---
 
-**Flag:**
+***FLAG 25: CREDENTIAL ACCESS - Master Password Extraction***
 
+**Objective:** Password managers store credentials for multiple systems. Extracting the master password provides access to all stored secrets.
 
-**Objective:** 
+**Flag:** `KeePass-Master-Password.txt`
+```
+DeviceProcessEvents
+| where DeviceName == "azuki-adminpc"
+| where TimeGenerated between (datetime(2025-11-24) .. datetime(2025-12-14))
+| where ProcessCommandLine has_any (".txt")
+| project TimeGenerated, DeviceName, FileName, ProcessCommandLine
+| order by TimeGenerated asc
+```
+<img width="952" height="72" alt="image" src="https://github.com/user-attachments/assets/dc0bf0ab-ef21-4dc1-9fe8-c2b0663bbd6e" />
 
-**Flag:**
+---
+
+## 2. Investigation Summary
+
+Five days after the initial file server compromise, the threat actor returned to the environment and escalated the intrusion significantly. Using the previously compromised account, `yuki.tanaka`, the attacker pivoted laterally from host `10.1.0.204` to `azuki-adminpc`, the CEO's administrative workstation — a high-value target with access to sensitive financial and credential data.
+On the new target, the attacker deployed a **Meterpreter** implant (disguised as `meterpreter.exe`) communicating over a named pipe (`msf-pipe-5902`), establishing persistent command-and-control. To maintain access even if discovered, they created a hidden local administrator account, `yuki.tanaka2`, via base64-obfuscated commands.
+The attacker then conducted extensive **reconnaissance** (active session, domain trust, and network enumeration via `qwinsta`, `nltest`, and `netstat`) before locating and harvesting credential stores, including a KeePass database (`OLD-Passwords.txt`, `KeePass-Master-Password.txt`) and Chrome-stored browser credentials extracted using a Mimikatz-based tool (`m.exe`).
+Sensitive files — including banking records — were staged via `Robocopy` into `C:\ProgramData\Microsoft\Crypto\staging`, where **8 password-protected archives** were prepared using 7-Zip for exfiltration. Stolen data, including `credentials.tar.gz`, was exfiltrated via HTTP POST to the anonymous file-sharing service `gofile.io` (store1.gofile.io), with supporting infrastructure tied to IP `45.112.123.227` and a secondary download from the previously identified C2 domain `litter.catbox.moe`.
+This second-stage intrusion represents a significant escalation: from initial workstation compromise to CEO-level access, persistent backdoor deployment, credential database theft, and confirmed exfiltration of financial and authentication data — warranting immediate credential resets, IOC blocking, and full forensic review of the affected systems.
+
+---
+
+## 3. MITRE ATT&CK Mapping
+
+| Tactic                              | Technique                                                 | Evidence                                         |
+| ----------------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
+| Initial Access / Lateral Movement   | T1078 - Valid Accounts                                    | Use of yuki.tanaka credentials                   |
+| Lateral Movement                    | T1021 - Remote Services                                   | Pivot from 10.1.0.204 to azuki-adminpc           |
+| Execution                           | T1059 - Command and Scripting Interpreter                 | Base64-encoded cmd/PowerShell commands           |
+| Defense Evasion                     | T1140 - Deobfuscate/Decode Files or Information           | Base64-encoded account creation commands         |
+| Persistence                         | T1136.001 - Create Account: Local Account                 | Creation of yuki.tanaka2                         | 
+| Privilege Escalation                | T1098 - Account Manipulation (Add to Admin Group)         | yuki.tanaka2 added to Administrators             |
+| Command and Control                 | T1071 / T1559 - Application Layer Protocol / IPC          | Meterpreter named pipe msf-pipe-5902             |
+| Command and Control / Resource Dev. | T1105 - Ingress Tool Transfer                             | curl.exe downloads from litter.catbox.moe        |
+| Discovery                           | T1087 - Account Discovery                                 | qwinsta.exe session enumeration                  |
+| Discovery                           | T1482 - Domain Trust Discovery                            | nltest.exe /domain_trusts                        |
+| Discovery                           | T1049 - System Network Connections Discovery              | netstat.exe -ano                                 |
+| Discovery                           | T1083 - File and Directory Discovery                      | where /r search for .kdbx files                  |
+| Credential Access                   | T1555 - Credentials from Password Stores                  | KeePass database, OLD-Passwords.txt              |
+| Credential Access                   | T1003.001 - OS Credential Dumping (DPAPI)                 | m.exe Chrome DPAPI credential extraction         |
+| Collection                          | T1074.001 - Data Staged                                   | Robocopy to staging directory                    |
+| Collection                          | T1560.001 - Archive Collected Data                        | 7z.exe creation of 8 password-protected archives |
+| Exfiltration                        | T1567.002 - Exfiltration Over Web Service (Cloud Storage) | curl POST to gofile.io                           |
+
+---
+
+## 4. Recommendations
+
+### Immediate Action
+
+- Isolate `azuki-adminpc` and `10.1.0.204` from the network for forensic imaging and analysis.
+- Force password resets for `yuki.tanaka` and all accounts with browser-saved or KeePass-stored credentials (assume full compromise).
+- Identify and disable/delete the rogue `yuki.tanaka2` account; audit all local admin group memberships across the environment.
+- Block C2/exfil infrastructure at firewall/proxy: `litter.catbox.moe, gofile.io` / `store1.gofile.io`, and `45.112.123.227`.
+- Kill any running `meterpreter.exe` processes and hunt for the `msf-pipe-5902` named pipe pattern on other hosts.
+- Preserve volatile evidence (memory, network connections, process list) before remediation actions.
+
+---
+
+**Report Status:** Complete  
+
+**Next Review:** 23th December 2025
+
+**Distribution:** Cyber Range
